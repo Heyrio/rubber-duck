@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import SiriWave from 'react-siriwave'
+import Wave from 'react-wavify'
 import { AppStatus } from '../stores/appStore'
 
 interface WaveformVizProps {
@@ -12,60 +12,68 @@ export default function WaveformViz({ isActive, status, audioLevels = [] }: Wave
   const color = useMemo(() => {
     switch (status) {
       case 'listening':
-        return '#22c55e' // green
+        return '#22c55e'
       case 'thinking':
-        return '#3b82f6' // blue
+        return '#3b82f6'
       case 'speaking':
-        return '#FFD93D' // duck yellow
+        return '#FFD93D'
       default:
-        return '#6b7280' // gray
+        return '#6b7280'
     }
   }, [status])
 
-  const amplitude = useMemo(() => {
-    if (!isActive) return 0.3
+  const avgLevel = useMemo(() => {
+    if (audioLevels.length === 0) return 0
+    return audioLevels.reduce((a, b) => a + b, 0) / audioLevels.length
+  }, [audioLevels])
 
-    if (status === 'listening' && audioLevels.length > 0) {
-      const avg = audioLevels.reduce((a, b) => a + b, 0) / audioLevels.length
-      return Math.max(0.5, Math.min(4, avg * 6 + 0.5))
+  const amplitude = useMemo(() => {
+    if (!isActive) return 5
+
+    if (status === 'listening' && avgLevel > 0) {
+      return Math.max(10, Math.min(40, avgLevel * 80))
     }
 
     switch (status) {
       case 'listening':
-        return 1
+        return 15
       case 'thinking':
-        return 1.5
+        return 20
       case 'speaking':
-        return 2.5
+        return 30
       default:
-        return 0.3
+        return 5
     }
-  }, [isActive, status, audioLevels])
+  }, [isActive, status, avgLevel])
 
   const speed = useMemo(() => {
-    if (!isActive) return 0.03
+    if (!isActive) return 0.1
 
     switch (status) {
       case 'listening':
-        return 0.1
-      case 'thinking':
-        return 0.15
-      case 'speaking':
         return 0.2
+      case 'thinking':
+        return 0.3
+      case 'speaking':
+        return 0.4
       default:
-        return 0.03
+        return 0.1
     }
   }, [isActive, status])
 
   return (
-    <SiriWave
-      theme="ios9"
-      color={color}
-      width={240}
-      height={60}
-      amplitude={amplitude}
-      speed={speed}
-      autostart={true}
-    />
+    <div className="w-[240px] h-[60px] overflow-hidden rounded-lg">
+      <Wave
+        fill={color}
+        paused={false}
+        style={{ display: 'flex', height: '100%' }}
+        options={{
+          height: 20,
+          amplitude,
+          speed,
+          points: 4
+        }}
+      />
+    </div>
   )
 }

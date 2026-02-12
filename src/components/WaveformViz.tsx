@@ -23,37 +23,37 @@ export default function WaveformViz({ isActive, status, audioLevels = [] }: Wave
   }, [status])
 
   const amplitude = useMemo(() => {
-    if (!isActive) return 0.1
+    if (!isActive) return 0.3
 
     if (status === 'listening' && audioLevels.length > 0) {
       const avg = audioLevels.reduce((a, b) => a + b, 0) / audioLevels.length
-      return Math.max(0.2, Math.min(3, avg * 4))
+      return Math.max(0.5, Math.min(4, avg * 6 + 0.5))
     }
 
     switch (status) {
       case 'listening':
-        return 0.5
+        return 1
       case 'thinking':
-        return 0.8
-      case 'speaking':
         return 1.5
+      case 'speaking':
+        return 2.5
       default:
-        return 0.1
+        return 0.3
     }
   }, [isActive, status, audioLevels])
 
   const speed = useMemo(() => {
-    if (!isActive) return 0.02
+    if (!isActive) return 0.03
 
     switch (status) {
       case 'listening':
-        return 0.05
+        return 0.1
       case 'thinking':
-        return 0.08
+        return 0.15
       case 'speaking':
-        return 0.12
+        return 0.2
       default:
-        return 0.02
+        return 0.03
     }
   }, [isActive, status])
 

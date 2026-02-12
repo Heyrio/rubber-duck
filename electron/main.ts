@@ -52,13 +52,11 @@ function createWindow() {
     width: 320,
     height: 400,
     frame: false,
-    transparent: true,
     alwaysOnTop: true,
     resizable: false,
     skipTaskbar: true,
-    hasShadow: true,
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
+    hasShadow: false,
+    backgroundColor: '#0f0f1a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -172,6 +170,10 @@ ipcMain.on('minimize-window', () => {
   mainWindow?.hide()
   // Show dock icon when window is hidden so user can find the app
   app.dock?.show()
+})
+
+ipcMain.on('close-window', () => {
+  app.quit()
 })
 
 app.whenReady().then(() => {

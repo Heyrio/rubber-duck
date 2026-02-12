@@ -326,17 +326,23 @@ function App() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[#0f0f1a] rounded-2xl overflow-hidden border border-yellow-400/20">
+    <div className="h-full flex flex-col bg-[#0f0f1a] overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-yellow-400/10">
         <div className="flex items-center gap-2">
-          <span className="text-xl">✨</span>
-          <span className="text-yellow-400 font-semibold text-sm">Vibeless</span>
+          <span className="text-blue-400 font-semibold text-sm">Vibeless</span>
         </div>
-        <button onClick={() => window.electronAPI?.minimizeWindow()} className="text-gray-400 hover:text-white p-1 no-drag">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => window.electronAPI?.minimizeWindow()} className="text-gray-400 hover:text-white p-1 no-drag">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+            </svg>
+          </button>
+          <button onClick={() => window.electronAPI?.closeWindow()} className="text-gray-400 hover:text-red-400 p-1 no-drag">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-2 border-b border-yellow-400/10">
@@ -367,7 +373,7 @@ function App() {
         <button
           onClick={toggleListening}
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform hover:scale-105 ${
-            isListening ? 'bg-red-600' : 'bg-yellow-500'
+            isListening ? 'bg-red-600' : 'bg-blue-500'
           }`}
         >
           {isListening ? (

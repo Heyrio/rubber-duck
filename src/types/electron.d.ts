@@ -3,6 +3,7 @@ export interface ElectronAPI {
   getListeningState: () => Promise<boolean>
   setListening: (value: boolean) => void
   minimizeWindow: () => void
+  closeWindow: () => void
   onToggleListening: (callback: (isListening: boolean) => void) => void
   removeToggleListeningListener: () => void
 }

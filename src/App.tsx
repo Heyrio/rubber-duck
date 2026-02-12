@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from './stores/appStore'
-import { useVisionContext } from './services/visionContext'
 import StatusIndicator from './components/StatusIndicator'
 import WaveformViz from './components/WaveformViz'
 
@@ -11,14 +10,11 @@ function App() {
     isMuted,
     transcript,
     error,
-    visionContext,
     setIsListening,
     setStatus,
     addToTranscript,
     setError
   } = useAppStore()
-
-  const { triggerCapture, startCapturing, stopCapturing } = useVisionContext()
 
   const [logs, setLogs] = useState<string[]>([])
   const addLog = (msg: string) => {
@@ -75,22 +71,49 @@ function App() {
     }
   }
 
-  const visionContextRef = useRef<string | null>(null)
+  const stopPlayback = () => {
+    // Stop all audio by closing and recreating context
+    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+      audioCtxRef.current.close()
+      audioCtxRef.current = null
+    }
+    nextPlayTimeRef.current = 0
+  }
 
-  // Keep ref in sync with state and update session when context changes
-  useEffect(() => {
-    visionContextRef.current = visionContext
-    // Update session instructions with new screen context
-    if (visionContext && wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log('Updating session with new screen context')
+  const lastScreenshotTime = useRef<number>(0)
+
+  // Capture and send screenshot directly to the Realtime API
+  const sendScreenshot = async () => {
+    // Debounce - only capture every 3 seconds max
+    const now = Date.now()
+    if (now - lastScreenshotTime.current < 3000) return
+    lastScreenshotTime.current = now
+
+    if (!window.electronAPI?.captureScreen || !wsRef.current) return
+    if (wsRef.current.readyState !== WebSocket.OPEN) return
+
+    try {
+      const screenshot = await window.electronAPI.captureScreen()
+      if (!screenshot) return
+
+      console.log('Sending screenshot to conversation')
+
+      // Send image directly to the conversation
       wsRef.current.send(JSON.stringify({
-        type: 'session.update',
-        session: {
-          instructions: `You are a helpful rubber duck debugging assistant. You can see the user's screen. Be very brief and helpful.\n\nCurrent screen context: ${visionContext}`
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{
+            type: 'input_image',
+            image: screenshot
+          }]
         }
       }))
+    } catch (e) {
+      console.error('Screenshot error:', e)
     }
-  }, [visionContext])
+  }
 
   const startVoice = async () => {
     console.log('startVoice called')
@@ -99,10 +122,6 @@ function App() {
       setError('No API key')
       return
     }
-
-    // Capture screen first
-    addLog('Capturing screen...')
-    await triggerCapture()
 
     let stream: MediaStream
     try {
@@ -122,9 +141,6 @@ function App() {
       return
     }
 
-    // Start periodic screen captures
-    startCapturing()
-
     try {
       setStatus('listening')
       addLog('Connecting...')
@@ -138,19 +154,16 @@ function App() {
       ws.onopen = () => {
         console.log('WS opened')
         addLog('Connected')
-        const screenContext = visionContextRef.current
-          ? `\n\nCurrent screen context: ${visionContextRef.current}`
-          : ''
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
             modalities: ['text', 'audio'],
-            instructions: `You are a helpful rubber duck debugging assistant. You can see the user's screen. Be very brief and helpful.${screenContext}`,
-            voice: 'alloy',
+            instructions: 'You are a helpful rubber duck debugging assistant. The user may share screenshots of their screen. When you see a screenshot, briefly describe what you see and offer help. Be concise and helpful.',
+            voice: 'shimmer',
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
             input_audio_transcription: { model: 'whisper-1' },
-            turn_detection: { type: 'server_vad', threshold: 0.5, silence_duration_ms: 1000 }
+            turn_detection: { type: 'server_vad', threshold: 0.5, silence_duration_ms: 800 }
           }
         }))
       }
@@ -165,6 +178,8 @@ function App() {
             startAudioCapture(ws, stream)
           } else if (msg.type === 'input_audio_buffer.speech_started') {
             addLog('Heard you!')
+            stopPlayback() // Stop AI audio when user starts speaking
+            sendScreenshot() // Capture screen when user starts speaking
             setStatus('listening')
           } else if (msg.type === 'input_audio_buffer.speech_stopped') {
             addLog('Processing...')
@@ -259,7 +274,6 @@ function App() {
 
   const stopVoice = () => {
     console.log('stopVoice called')
-    stopCapturing()
     try {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)

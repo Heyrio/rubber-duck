@@ -117,7 +117,7 @@ function createTray() {
     }
   ])
 
-  tray.setToolTip('aa')
+  tray.setToolTip('Vibeless')
   tray.setContextMenu(contextMenu)
 
   tray.on('click', () => {

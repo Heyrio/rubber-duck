@@ -25,10 +25,11 @@ function App() {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const intervalRef = useRef<number | null>(null)
+  const audioIntervalRef = useRef<number | null>(null)
+  const screenIntervalRef = useRef<number | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const nextPlayTimeRef = useRef<number>(0)
+  const inputAudioCtxRef = useRef<AudioContext | null>(null)
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -38,7 +39,6 @@ function App() {
 
   const playAudio = (base64Audio: string) => {
     try {
-      // Reuse or create AudioContext
       if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
         audioCtxRef.current = new AudioContext({ sampleRate: 24000 })
         nextPlayTimeRef.current = 0
@@ -61,7 +61,6 @@ function App() {
       source.buffer = buffer
       source.connect(ctx.destination)
 
-      // Schedule audio to play in sequence
       const now = ctx.currentTime
       const startTime = Math.max(now, nextPlayTimeRef.current)
       source.start(startTime)
@@ -72,7 +71,6 @@ function App() {
   }
 
   const stopPlayback = () => {
-    // Stop all audio by closing and recreating context
     if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
       audioCtxRef.current.close()
       audioCtxRef.current = null
@@ -80,46 +78,11 @@ function App() {
     nextPlayTimeRef.current = 0
   }
 
-  const lastScreenshotTime = useRef<number>(0)
-
-  // Capture and send screenshot directly to the Realtime API
-  const sendScreenshot = async () => {
-    // Debounce - only capture every 3 seconds max
-    const now = Date.now()
-    if (now - lastScreenshotTime.current < 3000) return
-    lastScreenshotTime.current = now
-
-    if (!window.electronAPI?.captureScreen || !wsRef.current) return
-    if (wsRef.current.readyState !== WebSocket.OPEN) return
-
-    try {
-      const screenshot = await window.electronAPI.captureScreen()
-      if (!screenshot) return
-
-      console.log('Sending screenshot to conversation')
-
-      // Send image directly to the conversation
-      wsRef.current.send(JSON.stringify({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: [{
-            type: 'input_image',
-            image: screenshot
-          }]
-        }
-      }))
-    } catch (e) {
-      console.error('Screenshot error:', e)
-    }
-  }
-
-  const startVoice = async () => {
-    console.log('startVoice called')
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY
+  const startGemini = async () => {
+    console.log('startGemini called')
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY
     if (!apiKey) {
-      setError('No API key')
+      setError('No Gemini API key - add VITE_GEMINI_API_KEY to .env')
       return
     }
 
@@ -127,7 +90,7 @@ function App() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 24000,
+          sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true
@@ -143,63 +106,77 @@ function App() {
 
     try {
       setStatus('listening')
-      addLog('Connecting...')
+      addLog('Connecting to Gemini...')
 
-      const ws = new WebSocket(
-        'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
-        ['realtime', `openai-insecure-api-key.${apiKey}`, 'openai-beta.realtime-v1']
-      )
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`
+      const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
       ws.onopen = () => {
-        console.log('WS opened')
+        console.log('Gemini WS opened')
         addLog('Connected')
-        ws.send(JSON.stringify({
-          type: 'session.update',
-          session: {
-            modalities: ['text', 'audio'],
-            instructions: 'You are a helpful rubber duck debugging assistant. The user may share screenshots of their screen. When you see a screenshot, briefly describe what you see and offer help. Be concise and helpful.',
-            voice: 'shimmer',
-            input_audio_format: 'pcm16',
-            output_audio_format: 'pcm16',
-            input_audio_transcription: { model: 'whisper-1' },
-            turn_detection: { type: 'server_vad', threshold: 0.5, silence_duration_ms: 800 }
+
+        // Send setup message
+        const setupMsg = {
+          setup: {
+            model: 'models/gemini-2.5-flash-native-audio-latest',
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: 'Aoede'
+                  }
+                }
+              }
+            },
+            systemInstruction: {
+              parts: [{
+                text: 'You are a helpful rubber duck debugging assistant. You can see the user\'s screen in real-time. Help them debug their code, explain what you see, and answer their questions. Be concise and helpful.'
+              }]
+            }
           }
-        }))
+        }
+        console.log('Sending setup:', JSON.stringify(setupMsg))
+        ws.send(JSON.stringify(setupMsg))
       }
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         try {
-          const msg = JSON.parse(event.data)
-          console.log('WS msg:', msg.type)
+          let msg
+          if (event.data instanceof Blob) {
+            const text = await event.data.text()
+            msg = JSON.parse(text)
+          } else {
+            msg = JSON.parse(event.data)
+          }
+          console.log('Gemini msg:', JSON.stringify(msg).slice(0, 500))
 
-          if (msg.type === 'session.updated') {
-            addLog('Session ready')
+          if (msg.setupComplete) {
+            addLog('Session ready - streaming screen')
             startAudioCapture(ws, stream)
-          } else if (msg.type === 'input_audio_buffer.speech_started') {
-            addLog('Heard you!')
-            stopPlayback() // Stop AI audio when user starts speaking
-            sendScreenshot() // Capture screen when user starts speaking
-            setStatus('listening')
-          } else if (msg.type === 'input_audio_buffer.speech_stopped') {
-            addLog('Processing...')
-            setStatus('thinking')
-          } else if (msg.type === 'response.created') {
-            // Reset audio queue for new response
-            nextPlayTimeRef.current = 0
-          } else if (msg.type === 'response.audio.delta' && msg.delta) {
-            setStatus('speaking')
-            playAudio(msg.delta)
-          } else if (msg.type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
-            addToTranscript(`You: ${msg.transcript}`)
-          } else if (msg.type === 'response.audio_transcript.done' && msg.transcript) {
-            addToTranscript(`Duck: ${msg.transcript}`)
-          } else if (msg.type === 'response.done') {
-            setStatus('listening')
-          } else if (msg.type === 'error') {
-            console.error('API Error:', msg.error)
-            addLog(`Error: ${msg.error?.message}`)
-            setError(msg.error?.message || 'Error')
+            startScreenCapture(ws)
+          } else if (msg.serverContent) {
+            const content = msg.serverContent
+
+            if (content.interrupted) {
+              stopPlayback()
+            }
+
+            if (content.modelTurn?.parts) {
+              for (const part of content.modelTurn.parts) {
+                if (part.inlineData?.mimeType?.startsWith('audio/')) {
+                  setStatus('speaking')
+                  playAudio(part.inlineData.data)
+                } else if (part.text) {
+                  addToTranscript(`Duck: ${part.text}`)
+                }
+              }
+            }
+
+            if (content.turnComplete) {
+              setStatus('listening')
+            }
           }
         } catch (e) {
           console.error('Parse error:', e)
@@ -213,8 +190,8 @@ function App() {
       }
 
       ws.onclose = (e) => {
-        console.log('WS closed:', e.code)
-        addLog(`Closed: ${e.code}`)
+        console.log('WS closed:', e.code, e.reason)
+        addLog(`Closed: ${e.code} ${e.reason}`)
         setStatus('idle')
       }
     } catch (e: any) {
@@ -227,11 +204,11 @@ function App() {
   const startAudioCapture = (ws: WebSocket, stream: MediaStream) => {
     console.log('startAudioCapture called')
     try {
-      // Use AudioContext to capture raw PCM data
-      const audioContext = new AudioContext({ sampleRate: 24000 })
-      const sourceNode = audioContext.createMediaStreamSource(stream)
-      const analyser = audioContext.createAnalyser()
-      analyser.fftSize = 4096
+      inputAudioCtxRef.current = new AudioContext({ sampleRate: 16000 })
+      const ctx = inputAudioCtxRef.current
+      const sourceNode = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 2048
       sourceNode.connect(analyser)
 
       const bufferLength = analyser.fftSize
@@ -239,8 +216,7 @@ function App() {
 
       addLog('Speak now!')
 
-      // Poll for audio data
-      intervalRef.current = window.setInterval(() => {
+      audioIntervalRef.current = window.setInterval(() => {
         if (ws.readyState !== WebSocket.OPEN) return
 
         analyser.getFloatTimeDomainData(dataArray)
@@ -260,10 +236,14 @@ function App() {
         const base64 = btoa(binary)
 
         ws.send(JSON.stringify({
-          type: 'input_audio_buffer.append',
-          audio: base64
+          realtimeInput: {
+            mediaChunks: [{
+              mimeType: 'audio/pcm;rate=16000',
+              data: base64
+            }]
+          }
         }))
-      }, 100) // Send every 100ms
+      }, 100)
 
       console.log('Audio capture started')
     } catch (e: any) {
@@ -272,16 +252,51 @@ function App() {
     }
   }
 
-  const stopVoice = () => {
-    console.log('stopVoice called')
-    try {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
+  const startScreenCapture = (ws: WebSocket) => {
+    console.log('startScreenCapture called')
+
+    const captureAndSend = async () => {
+      if (ws.readyState !== WebSocket.OPEN) return
+      if (!window.electronAPI?.captureScreen) return
+
+      try {
+        const screenshot = await window.electronAPI.captureScreen()
+        if (!screenshot) return
+
+        // Send screen frame to Gemini
+        ws.send(JSON.stringify({
+          realtimeInput: {
+            mediaChunks: [{
+              mimeType: 'image/jpeg',
+              data: screenshot
+            }]
+          }
+        }))
+      } catch (e) {
+        console.error('Screen capture error:', e)
       }
-      if (recorderRef.current) {
-        recorderRef.current.stop()
-        recorderRef.current = null
+    }
+
+    // Capture immediately and then every 1 second
+    captureAndSend()
+    screenIntervalRef.current = window.setInterval(captureAndSend, 1000)
+    console.log('Screen capture started - 1 fps')
+  }
+
+  const stopGemini = () => {
+    console.log('stopGemini called')
+    try {
+      if (audioIntervalRef.current) {
+        clearInterval(audioIntervalRef.current)
+        audioIntervalRef.current = null
+      }
+      if (screenIntervalRef.current) {
+        clearInterval(screenIntervalRef.current)
+        screenIntervalRef.current = null
+      }
+      if (inputAudioCtxRef.current) {
+        inputAudioCtxRef.current.close()
+        inputAudioCtxRef.current = null
       }
       if (audioCtxRef.current) {
         audioCtxRef.current.close()
@@ -301,12 +316,12 @@ function App() {
   const toggleListening = () => {
     console.log('toggleListening, isListening:', isListening)
     if (isListening) {
-      stopVoice()
+      stopGemini()
       setIsListening(false)
     } else {
       setLogs([])
       setIsListening(true)
-      startVoice()
+      startGemini()
     }
   }
 

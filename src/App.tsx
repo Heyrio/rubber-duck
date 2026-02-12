@@ -420,7 +420,7 @@ function App() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[#0f0f1a] overflow-hidden">
+    <div className="h-full flex flex-col bg-[#0f0f1a] overflow-hidden border border-gray-700 rounded-xl">
       <div className="flex items-center justify-between px-4 py-2 border-b border-yellow-400/10">
         <div className="flex items-center gap-2">
           <img src={vibelessLogo} alt="Vibeless" className="h-5" />

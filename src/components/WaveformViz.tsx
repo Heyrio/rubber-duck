@@ -4,9 +4,10 @@ import { AppStatus } from '../stores/appStore'
 interface WaveformVizProps {
   isActive: boolean
   status: AppStatus
+  audioLevels?: number[]
 }
 
-export default function WaveformViz({ isActive, status }: WaveformVizProps) {
+export default function WaveformViz({ isActive, status, audioLevels = [] }: WaveformVizProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number>()
   const barsRef = useRef<number[]>(new Array(20).fill(0))
@@ -29,12 +30,19 @@ export default function WaveformViz({ isActive, status }: WaveformVizProps) {
         return 4 // Minimal height when inactive
       }
 
+      // Use real audio levels when listening
+      if (status === 'listening' && audioLevels.length > 0) {
+        const level = audioLevels[index] || 0
+        // Scale the level to a nice visual height (min 6, max 55)
+        return 6 + level * 50
+      }
+
       const centerIndex = barCount / 2
       const distanceFromCenter = Math.abs(index - centerIndex) / centerIndex
 
       switch (status) {
         case 'listening':
-          // Gentle breathing animation
+          // Gentle breathing animation (fallback when no audio data)
           return 8 + Math.sin(time / 300 + index * 0.3) * 15 * (1 - distanceFromCenter * 0.5)
         case 'thinking':
           // Wave pattern
@@ -67,8 +75,9 @@ export default function WaveformViz({ isActive, status }: WaveformVizProps) {
 
       for (let i = 0; i < barCount; i++) {
         const targetHeight = getTargetHeight(i, time)
-        // Smooth interpolation
-        bars[i] += (targetHeight - bars[i]) * 0.15
+        // Smooth interpolation - faster for real audio data
+        const smoothing = status === 'listening' && audioLevels.length > 0 ? 0.3 : 0.15
+        bars[i] += (targetHeight - bars[i]) * smoothing
 
         const x = i * (barWidth + barGap)
         const height = Math.max(4, bars[i])
@@ -91,7 +100,7 @@ export default function WaveformViz({ isActive, status }: WaveformVizProps) {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isActive, status])
+  }, [isActive, status, audioLevels])
 
   return (
     <canvas

@@ -151,7 +151,7 @@ function App() {
           setup: {
             model: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
             generationConfig: {
-              responseModalities: ['AUDIO', 'TEXT'],
+              responseModalities: ['AUDIO'],
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {

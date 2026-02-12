@@ -119,7 +119,7 @@ function createTray() {
     }
   ])
 
-  tray.setToolTip('Rubber Duck')
+  tray.setToolTip('Vibeless')
   tray.setContextMenu(contextMenu)
 
   tray.on('click', () => {
@@ -170,6 +170,8 @@ ipcMain.on('set-listening', (_event, value: boolean) => {
 
 ipcMain.on('minimize-window', () => {
   mainWindow?.hide()
+  // Show dock icon when window is hidden so user can find the app
+  app.dock?.show()
 })
 
 app.whenReady().then(() => {
@@ -187,6 +189,9 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (mainWindow === null) {
     createWindow()
+  } else {
+    // Show window when clicking dock icon
+    mainWindow.show()
   }
 })
 

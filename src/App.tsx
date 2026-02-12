@@ -132,7 +132,7 @@ function App() {
             },
             systemInstruction: {
               parts: [{
-                text: 'You are a helpful rubber duck debugging assistant. You can see the user\'s screen in real-time. Help them debug their code, explain what you see, and answer their questions. Be concise and helpful.'
+                text: 'You are Vibeless, a helpful AI coding assistant. You can see the user\'s screen in real-time. Help them debug their code, explain what you see, and answer their questions. Be concise and helpful.'
               }]
             }
           }
@@ -329,8 +329,8 @@ function App() {
     <div className="h-full flex flex-col bg-[#0f0f1a] rounded-2xl overflow-hidden border border-yellow-400/20">
       <div className="flex items-center justify-between px-4 py-2 border-b border-yellow-400/10">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🦆</span>
-          <span className="text-yellow-400 font-semibold text-sm">Rubber Duck</span>
+          <span className="text-xl">✨</span>
+          <span className="text-yellow-400 font-semibold text-sm">Vibeless</span>
         </div>
         <button onClick={() => window.electronAPI?.minimizeWindow()} className="text-gray-400 hover:text-white p-1 no-drag">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

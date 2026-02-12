@@ -1,8 +1,8 @@
 {
-  "name": "rubber-duck",
+  "name": "vibeless",
   "version": "1.0.0",
   "type": "module",
-  "description": "AI coding companion with voice and screen awareness",
+  "description": "AI coding companion with real-time voice and screen awareness",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -34,8 +34,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.rubberduck.app",
-    "productName": "Rubber Duck",
+    "appId": "com.vibeless.app",
+    "productName": "Vibeless",
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": "dmg",

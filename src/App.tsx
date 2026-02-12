@@ -3,6 +3,7 @@ import { useAppStore } from './stores/appStore'
 import StatusIndicator from './components/StatusIndicator'
 import WaveformViz from './components/WaveformViz'
 import { syncSession } from './lib/sync'
+import vibelessLogo from './assets/vibeless-logo.png'
 
 function App() {
   const {
@@ -148,9 +149,9 @@ function App() {
         // Send setup message
         const setupMsg = {
           setup: {
-            model: 'models/gemini-2.5-flash-native-audio-latest',
+            model: 'models/gemini-2.5-flash-native-audio-preview-12-2025',
             generationConfig: {
-              responseModalities: ['AUDIO'],
+              responseModalities: ['AUDIO', 'TEXT'],
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
@@ -422,7 +423,7 @@ function App() {
     <div className="h-full flex flex-col bg-[#0f0f1a] overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-yellow-400/10">
         <div className="flex items-center gap-2">
-          <span className="text-blue-400 font-semibold text-sm">Vibeless</span>
+          <img src={vibelessLogo} alt="Vibeless" className="h-5" />
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setShowSettings(!showSettings)} className="text-gray-400 hover:text-white p-1 no-drag">

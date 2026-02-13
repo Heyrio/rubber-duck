@@ -3,6 +3,7 @@ import { useAppStore } from './stores/appStore'
 import StatusIndicator from './components/StatusIndicator'
 import WaveformViz from './components/WaveformViz'
 import { syncSession } from './lib/sync'
+import { getMemory, saveMemory, buildMemoryPrompt, extractKnowledge } from './lib/memory'
 import vibelessLogo from './assets/vibeless-logo.png'
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
   } = useAppStore()
 
   const [logs, setLogs] = useState<string[]>([])
+  const [isStopping, setIsStopping] = useState(false)
   const addLog = (msg: string) => {
     console.log('LOG:', msg)
     setLogs(prev => [...prev.slice(-20), msg])
@@ -40,7 +42,36 @@ function App() {
   const isSpeakingRef = useRef<boolean>(false)
   const sessionStartRef = useRef<number>(0)
   const analyserRef = useRef<AnalyserNode | null>(null)
+  const speechRecognitionRef = useRef<SpeechRecognition | null>(null)
   const [audioLevels, setAudioLevels] = useState<number[]>(new Array(20).fill(0))
+
+  const buildSystemPrompt = () => {
+    const memoryContext = buildMemoryPrompt()
+    const basePrompt = `You are Vibeless, a helpful AI coding assistant. You can see the user's screen in real-time.
+
+## Your Role
+- Help debug code and explain what you see
+- Answer programming questions concisely
+- Point out potential bugs or improvements
+
+## Guidelines
+- Be concise and helpful
+- When you see code, reference specific line numbers
+- Suggest fixes with code examples when appropriate
+- If you're unsure, say so
+
+## Tone
+- Friendly but professional
+- Like a knowledgeable colleague`
+
+    if (memoryContext) {
+      return `${basePrompt}
+
+## Memory from Previous Sessions
+${memoryContext}`
+    }
+    return basePrompt
+  }
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -109,8 +140,17 @@ function App() {
 
   const startGemini = async () => {
     console.log('startGemini called')
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY
-    if (!apiKey) {
+
+    // Require Vibeless API key to use the app
+    const vibelessKey = useAppStore.getState().apiKey
+    if (!vibelessKey) {
+      setError('Please set your Vibeless API key in settings')
+      setIsListening(false)
+      return
+    }
+
+    const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
+    if (!geminiKey) {
       setError('No Gemini API key - add VITE_GEMINI_API_KEY to .env')
       return
     }
@@ -138,7 +178,7 @@ function App() {
       sessionStartRef.current = Date.now()
       addLog('Connecting to Gemini...')
 
-      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`
+      const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${geminiKey}`
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
@@ -155,14 +195,16 @@ function App() {
               speechConfig: {
                 voiceConfig: {
                   prebuiltVoiceConfig: {
-                    voiceName: 'Aoede'
+                    voiceName: 'Orus'
                   }
                 }
               }
             },
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
             systemInstruction: {
               parts: [{
-                text: 'You are Vibeless, a helpful AI coding assistant. You can see the user\'s screen in real-time. Help them debug their code, explain what you see, and answer their questions. Be concise and helpful.'
+                text: buildSystemPrompt()
               }]
             }
           }
@@ -186,12 +228,23 @@ function App() {
             addLog('Session ready - streaming screen')
             startAudioCapture(ws, stream)
             startScreenCapture(ws)
+            startSpeechRecognition()
           } else if (msg.serverContent) {
             const content = msg.serverContent
 
             if (content.interrupted) {
               stopPlayback()
               isSpeakingRef.current = false
+            }
+
+            // Capture user's speech transcript
+            if (content.inputTranscription?.text) {
+              addToTranscript(`You: ${content.inputTranscription.text}`)
+            }
+
+            // Capture AI's speech transcript
+            if (content.outputTranscription?.text) {
+              addToTranscript(`Vibeless: ${content.outputTranscription.text}`)
             }
 
             if (content.modelTurn?.parts) {
@@ -206,7 +259,7 @@ function App() {
                   setStatus('speaking')
                   playAudio(part.inlineData.data)
                 } else if (part.text && !part.thought) {
-                  // Only capture actual responses, not internal thinking
+                  // Fallback: capture text parts if present
                   addToTranscript(`Vibeless: ${part.text}`)
                 }
               }
@@ -352,6 +405,58 @@ function App() {
     console.log('Screen capture started - 1 fps')
   }
 
+  const startSpeechRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      console.log('Speech recognition not supported')
+      return
+    }
+
+    const recognition = new SpeechRecognition()
+    recognition.continuous = true
+    recognition.interimResults = false
+    recognition.lang = 'en-US'
+
+    recognition.onresult = (event) => {
+      const last = event.results.length - 1
+      const text = event.results[last][0].transcript.trim()
+      if (text) {
+        addToTranscript(`You: ${text}`)
+      }
+    }
+
+    recognition.onerror = (event) => {
+      console.log('Speech recognition error:', event.error)
+      // Restart on recoverable errors
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        try {
+          recognition.start()
+        } catch (e) {
+          // Already running
+        }
+      }
+    }
+
+    recognition.onend = () => {
+      // Restart if we're still listening
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        try {
+          recognition.start()
+        } catch (e) {
+          // Already running
+        }
+      }
+    }
+
+    try {
+      recognition.start()
+      speechRecognitionRef.current = recognition
+      console.log('Speech recognition started')
+    } catch (e) {
+      console.error('Failed to start speech recognition:', e)
+    }
+  }
+
   const stopGemini = async () => {
     console.log('stopGemini called')
     try {
@@ -362,6 +467,10 @@ function App() {
       if (screenIntervalRef.current) {
         clearInterval(screenIntervalRef.current)
         screenIntervalRef.current = null
+      }
+      if (speechRecognitionRef.current) {
+        speechRecognitionRef.current.stop()
+        speechRecognitionRef.current = null
       }
       if (inputAudioCtxRef.current) {
         inputAudioCtxRef.current.close()
@@ -383,24 +492,43 @@ function App() {
     setAudioLevels(new Array(20).fill(0))
 
     // Sync session to web app if API key is set and there's transcript
-    // Get fresh transcript from store
+    // Get fresh values from store (not stale closure values)
     const currentTranscript = useAppStore.getState().transcript
-    console.log('Sync check:', { apiKey: !!apiKey, transcriptLen: currentTranscript.length, sessionStart: sessionStartRef.current })
+    const currentApiKey = useAppStore.getState().apiKey
+    console.log('Sync check:', { apiKey: !!currentApiKey, transcriptLen: currentTranscript.length, sessionStart: sessionStartRef.current })
 
-    if (apiKey && currentTranscript.length > 0 && sessionStartRef.current > 0) {
+    if (currentApiKey && sessionStartRef.current > 0) {
       const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000)
       addLog('Syncing session...')
       try {
-        await syncSession(apiKey, {
+        await syncSession(currentApiKey, {
           transcript: currentTranscript,
           duration,
           title: `Coding Session - ${new Date().toLocaleDateString()}`,
         })
         addLog('Session synced!')
-      } catch (e) {
+
+        // Extract and save knowledge for future sessions
+        if (currentTranscript.length > 0) {
+          addLog('Saving knowledge...')
+          const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
+          const knowledge = await extractKnowledge(currentTranscript, geminiKey)
+          const memory = getMemory()
+          if (knowledge.recentWork) {
+            memory.recentWork = knowledge.recentWork
+          }
+          for (const entry of knowledge.newEntries) {
+            memory.entries.push({ ...entry, timestamp: Date.now() })
+          }
+          saveMemory(memory)
+          addLog('Knowledge saved!')
+        }
+      } catch (e: any) {
         console.error('Sync error:', e)
-        addLog('Sync failed')
+        addLog(`Sync failed: ${e.message}`)
       }
+    } else {
+      console.log('Skipping sync:', { hasApiKey: !!currentApiKey, sessionStart: sessionStartRef.current })
     }
     sessionStartRef.current = 0
 
@@ -408,10 +536,14 @@ function App() {
   }
 
   const toggleListening = async () => {
-    console.log('toggleListening, isListening:', isListening)
+    console.log('toggleListening, isListening:', isListening, 'isStopping:', isStopping)
+    if (isStopping) return // Prevent multiple clicks while stopping
+
     if (isListening) {
+      setIsStopping(true)
+      setIsListening(false) // Update UI immediately
       await stopGemini()
-      setIsListening(false)
+      setIsStopping(false)
     } else {
       setLogs([])
       setIsListening(true)
@@ -488,14 +620,24 @@ function App() {
       <div className="px-4 py-3 border-t border-yellow-400/10 flex items-center justify-center no-drag">
         <button
           onClick={toggleListening}
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform hover:scale-105 ${
-            isListening ? 'bg-red-600' : 'bg-blue-500'
+          disabled={isStopping}
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+            isStopping
+              ? 'bg-gray-600 cursor-not-allowed opacity-50'
+              : isListening
+                ? 'bg-red-600 hover:scale-105'
+                : 'bg-blue-500 hover:scale-105'
           }`}
         >
-          {isListening ? (
+          {isStopping ? (
+            <svg className="w-6 h-6 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : isListening ? (
             <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
           ) : (
-            <svg className="w-6 h-6 text-gray-900 text-white " fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
             </svg>
           )}

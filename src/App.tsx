@@ -43,10 +43,16 @@ function App() {
   const sessionStartRef = useRef<number>(0)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const speechRecognitionRef = useRef<SpeechRecognition | null>(null)
+  const pendingUserTranscript = useRef<string>('')
+  const pendingAITranscript = useRef<string>('')
   const [audioLevels, setAudioLevels] = useState<number[]>(new Array(20).fill(0))
 
   const buildSystemPrompt = () => {
+    const memory = getMemory()
     const memoryContext = buildMemoryPrompt()
+    console.log('Loading memory:', memory)
+    console.log('Memory context for prompt:', memoryContext)
+
     const basePrompt = `You are Vibeless, a helpful AI coding assistant. You can see the user's screen in real-time.
 
 ## Your Role
@@ -65,10 +71,12 @@ function App() {
 - Like a knowledgeable colleague`
 
     if (memoryContext) {
-      return `${basePrompt}
+      const fullPrompt = `${basePrompt}
 
 ## Memory from Previous Sessions
 ${memoryContext}`
+      console.log('Full system prompt with memory:', fullPrompt)
+      return fullPrompt
     }
     return basePrompt
   }
@@ -231,25 +239,43 @@ ${memoryContext}`
             startSpeechRecognition()
           } else if (msg.serverContent) {
             const content = msg.serverContent
+            // Log all content keys to see what Gemini is sending
+            console.log('serverContent keys:', Object.keys(content))
+            if (content.inputTranscription) console.log('inputTranscription:', content.inputTranscription)
+            if (content.outputTranscription) console.log('outputTranscription:', content.outputTranscription)
 
             if (content.interrupted) {
               stopPlayback()
               isSpeakingRef.current = false
+              // Commit any pending transcripts on interruption
+              if (pendingAITranscript.current.trim()) {
+                addToTranscript(`Vibeless: ${pendingAITranscript.current.trim()}`)
+                pendingAITranscript.current = ''
+              }
             }
 
-            // Capture user's speech transcript
+            // Accumulate user's speech transcript (streams word by word)
             if (content.inputTranscription?.text) {
-              addToTranscript(`You: ${content.inputTranscription.text}`)
+              const text = content.inputTranscription.text
+              // Skip noise markers
+              if (!text.includes('<noise>')) {
+                pendingUserTranscript.current += text
+              }
             }
 
-            // Capture AI's speech transcript
+            // Accumulate AI's speech transcript (streams word by word)
             if (content.outputTranscription?.text) {
-              addToTranscript(`Vibeless: ${content.outputTranscription.text}`)
+              pendingAITranscript.current += content.outputTranscription.text
             }
 
             if (content.modelTurn?.parts) {
-              // If we weren't speaking, this is a new turn - clear any old audio
+              // If we weren't speaking, this is a new turn
+              // Commit pending user transcript and clear AI transcript
               if (!isSpeakingRef.current) {
+                if (pendingUserTranscript.current.trim()) {
+                  addToTranscript(`You: ${pendingUserTranscript.current.trim()}`)
+                  pendingUserTranscript.current = ''
+                }
                 stopPlayback()
               }
 
@@ -259,8 +285,8 @@ ${memoryContext}`
                   setStatus('speaking')
                   playAudio(part.inlineData.data)
                 } else if (part.text && !part.thought) {
-                  // Fallback: capture text parts if present
-                  addToTranscript(`Vibeless: ${part.text}`)
+                  // Fallback: accumulate text parts if present
+                  pendingAITranscript.current += part.text
                 }
               }
             }
@@ -268,6 +294,11 @@ ${memoryContext}`
             if (content.turnComplete) {
               isSpeakingRef.current = false
               setStatus('listening')
+              // Commit pending AI transcript when turn completes
+              if (pendingAITranscript.current.trim()) {
+                addToTranscript(`Vibeless: ${pendingAITranscript.current.trim()}`)
+                pendingAITranscript.current = ''
+              }
             }
           }
         } catch (e) {
@@ -501,24 +532,26 @@ ${memoryContext}`
       const duration = Math.floor((Date.now() - sessionStartRef.current) / 1000)
       addLog('Syncing session...')
       try {
-        await syncSession(currentApiKey, {
+        const syncResult = await syncSession(currentApiKey, {
           transcript: currentTranscript,
           duration,
           title: `Coding Session - ${new Date().toLocaleDateString()}`,
         })
         addLog('Session synced!')
 
-        // Extract and save knowledge for future sessions
-        if (currentTranscript.length > 0) {
-          addLog('Saving knowledge...')
-          const geminiKey = import.meta.env.VITE_GEMINI_API_KEY
-          const knowledge = await extractKnowledge(currentTranscript, geminiKey)
+        // Save memory from sync result (website already analyzed with Gemini)
+        if (syncResult?.summary) {
           const memory = getMemory()
-          if (knowledge.recentWork) {
-            memory.recentWork = knowledge.recentWork
-          }
-          for (const entry of knowledge.newEntries) {
-            memory.entries.push({ ...entry, timestamp: Date.now() })
+          memory.recentWork = syncResult.summary
+          // Add learning moments to memory if any
+          if (syncResult.learningMoments?.length > 0) {
+            for (const lm of syncResult.learningMoments) {
+              memory.entries.push({
+                type: lm.type as any,
+                content: lm.content,
+                timestamp: Date.now()
+              })
+            }
           }
           saveMemory(memory)
           addLog('Knowledge saved!')

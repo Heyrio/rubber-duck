@@ -97,6 +97,7 @@ export async function extractKnowledge(transcript: string[], geminiKey?: string)
   const conversationText = transcript.join('\n')
 
   try {
+    console.log('Extracting knowledge from transcript...')
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
       {
@@ -131,10 +132,14 @@ Rules:
       }
     )
 
-    if (!response.ok) return { recentWork: '', newEntries: [] }
+    if (!response.ok) {
+      console.error('Knowledge extraction API error:', response.status)
+      return { recentWork: '', newEntries: [] }
+    }
 
     const data = await response.json()
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    console.log('Knowledge extraction raw response:', text)
 
     let jsonStr = text.trim()
     if (jsonStr.startsWith('```')) {
@@ -142,6 +147,7 @@ Rules:
     }
 
     const result = JSON.parse(jsonStr)
+    console.log('Extracted knowledge:', result)
     return {
       recentWork: result.recentWork || '',
       newEntries: result.entries || []

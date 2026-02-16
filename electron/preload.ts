@@ -11,5 +11,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   removeToggleListeningListener: () => {
     ipcRenderer.removeAllListeners('toggle-listening')
-  }
+  },
+  // Codebase context features
+  selectDirectory: () => ipcRenderer.invoke('select-directory'),
+  indexCodebase: (repoPath: string) => ipcRenderer.invoke('index-codebase', repoPath),
+  getCodebaseIndex: () => ipcRenderer.invoke('get-codebase-index'),
+  getFileContent: (filePath: string) => ipcRenderer.invoke('get-file-content', filePath)
 })

@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, nativeImage, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, nativeImage, screen, dialog } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { captureScreen } from './screenCapture'
+import { indexCodebase, CodebaseIndex } from './codebaseIndexer'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -160,6 +161,45 @@ ipcMain.handle('capture-screen', async () => {
 })
 
 ipcMain.handle('get-listening-state', () => isListening)
+
+ipcMain.handle('select-directory', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory'],
+    title: 'Select Repository',
+    buttonLabel: 'Select Repo'
+  })
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null
+  }
+
+  return result.filePaths[0]
+})
+
+let currentCodebaseIndex: CodebaseIndex | null = null
+
+ipcMain.handle('index-codebase', async (_event, repoPath: string) => {
+  try {
+    currentCodebaseIndex = await indexCodebase(repoPath)
+    return currentCodebaseIndex
+  } catch (error) {
+    console.error('Indexing failed:', error)
+    return null
+  }
+})
+
+ipcMain.handle('get-codebase-index', () => currentCodebaseIndex)
+
+ipcMain.handle('get-file-content', async (_event, filePath: string) => {
+  try {
+    const fs = await import('fs/promises')
+    const content = await fs.readFile(filePath, 'utf-8')
+    return content
+  } catch (error) {
+    console.error('Failed to read file:', error)
+    return null
+  }
+})
 
 ipcMain.on('set-listening', (_event, value: boolean) => {
   isListening = value

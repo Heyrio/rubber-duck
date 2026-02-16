@@ -3,8 +3,10 @@ import { useAppStore } from './stores/appStore'
 import StatusIndicator from './components/StatusIndicator'
 import WaveformViz from './components/WaveformViz'
 import { syncSession } from './lib/sync'
-import { getMemory, saveMemory, buildMemoryPrompt, extractKnowledge } from './lib/memory'
+import { getMemory, saveMemory, buildMemoryPrompt } from './lib/memory'
+import { setCodebaseIndex, buildCodebaseContext, hasCodebaseContext } from './lib/codeContext'
 import vibelessLogo from './assets/vibeless-logo.png'
+import systemPrompt from './utils/prompt.txt'
 
 function App() {
   const {
@@ -15,12 +17,18 @@ function App() {
     error,
     apiKey,
     showSettings,
+    repoPath,
+    repoName,
+    isIndexing,
     setIsListening,
     setStatus,
     addToTranscript,
     setError,
     setApiKey,
-    setShowSettings
+    setShowSettings,
+    setRepoPath,
+    setRepoName,
+    setIsIndexing
   } = useAppStore()
 
   const [logs, setLogs] = useState<string[]>([])
@@ -50,36 +58,76 @@ function App() {
   const buildSystemPrompt = () => {
     const memory = getMemory()
     const memoryContext = buildMemoryPrompt()
+    const codebaseContext = buildCodebaseContext()
+
     console.log('Loading memory:', memory)
     console.log('Memory context for prompt:', memoryContext)
+    console.log('Has codebase context:', hasCodebaseContext())
 
-    const basePrompt = `You are Vibeless, a helpful AI coding assistant. You can see the user's screen in real-time.
+    let fullPrompt = systemPrompt
 
-## Your Role
-- Help debug code and explain what you see
-- Answer programming questions concisely
-- Point out potential bugs or improvements
-
-## Guidelines
-- Be concise and helpful
-- When you see code, reference specific line numbers
-- Suggest fixes with code examples when appropriate
-- If you're unsure, say so
-
-## Tone
-- Friendly but professional
-- Like a knowledgeable colleague`
-
-    if (memoryContext) {
-      const fullPrompt = `${basePrompt}
-
-## Memory from Previous Sessions
-${memoryContext}`
-      console.log('Full system prompt with memory:', fullPrompt)
-      return fullPrompt
+    // Add codebase context if available
+    if (codebaseContext) {
+      fullPrompt += `\n\n${codebaseContext}`
     }
-    return basePrompt
+
+    // Add memory context if available
+    if (memoryContext) {
+      fullPrompt += `\n\n## Memory from Previous Sessions\n${memoryContext}`
+    }
+
+    console.log('Full system prompt length:', fullPrompt.length)
+    return fullPrompt
   }
+
+  // Handle selecting and indexing a repo
+  const handleSelectRepo = async () => {
+    if (!window.electronAPI?.selectDirectory) return
+
+    try {
+      const selectedPath = await window.electronAPI.selectDirectory()
+      if (!selectedPath) return
+
+      setIsIndexing(true)
+      setRepoPath(selectedPath)
+      addLog(`Indexing ${selectedPath}...`)
+
+      const index = await window.electronAPI.indexCodebase(selectedPath)
+      if (index) {
+        setCodebaseIndex(index)
+        setRepoName(index.repoName)
+        addLog(`Indexed ${index.totalFiles} files in ${index.repoName}`)
+      } else {
+        setError('Failed to index repository')
+      }
+    } catch (e: any) {
+      setError(`Indexing failed: ${e.message}`)
+    } finally {
+      setIsIndexing(false)
+    }
+  }
+
+  // Re-index on startup if we have a saved repo path
+  useEffect(() => {
+    const reindexSavedRepo = async () => {
+      const savedPath = useAppStore.getState().repoPath
+      if (savedPath && window.electronAPI?.indexCodebase) {
+        setIsIndexing(true)
+        try {
+          const index = await window.electronAPI.indexCodebase(savedPath)
+          if (index) {
+            setCodebaseIndex(index)
+            console.log(`Re-indexed ${index.repoName} on startup`)
+          }
+        } catch (e) {
+          console.error('Failed to re-index saved repo:', e)
+        } finally {
+          setIsIndexing(false)
+        }
+      }
+    }
+    reindexSavedRepo()
+  }, [])
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -589,6 +637,11 @@ ${memoryContext}`
       <div className="flex items-center justify-between px-4 py-2 border-b border-yellow-400/10">
         <div className="flex items-center gap-2">
           <img src={vibelessLogo} alt="Vibeless" className="h-5" />
+          {repoName && (
+            <span className="text-xs text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded" title={`Context: ${repoPath}`}>
+              {repoName}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => setShowSettings(!showSettings)} className="text-gray-400 hover:text-white p-1 no-drag">
@@ -623,6 +676,37 @@ ${memoryContext}`
           <p className="text-xs text-gray-500 mt-1">
             {apiKey ? 'Connected to Vibeless' : 'Get your key at vibeless.com'}
           </p>
+
+          <div className="mt-3 pt-3 border-t border-gray-700">
+            <label className="block text-xs text-gray-400 mb-1">Repository Context</label>
+            <button
+              onClick={handleSelectRepo}
+              disabled={isIndexing}
+              className="w-full px-2 py-1.5 text-xs bg-[#0f0f1a] border border-gray-700 rounded text-white hover:border-yellow-400/50 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isIndexing ? (
+                <>
+                  <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Indexing...
+                </>
+              ) : (
+                <>
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  {repoName ? `Change Repo (${repoName})` : 'Select Repository'}
+                </>
+              )}
+            </button>
+            {repoPath && (
+              <p className="text-xs text-green-400 mt-1 truncate" title={repoPath}>
+                Active: {repoName}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

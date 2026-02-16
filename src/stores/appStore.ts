@@ -19,6 +19,11 @@ interface AppState {
   // Settings panel
   showSettings: boolean
 
+  // Codebase context
+  repoPath: string | null
+  repoName: string | null
+  isIndexing: boolean
+
   setIsListening: (value: boolean) => void
   setStatus: (status: AppStatus) => void
   setMuted: (value: boolean) => void
@@ -30,6 +35,9 @@ interface AppState {
   setApiKey: (key: string | null) => void
   setSessionStartTime: (time: number | null) => void
   setShowSettings: (show: boolean) => void
+  setRepoPath: (path: string | null) => void
+  setRepoName: (name: string | null) => void
+  setIsIndexing: (value: boolean) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -45,6 +53,9 @@ export const useAppStore = create<AppState>()(
       apiKey: null,
       sessionStartTime: null,
       showSettings: false,
+      repoPath: null,
+      repoName: null,
+      isIndexing: false,
 
       setIsListening: (value) => set({ isListening: value }),
       setStatus: (status) => set({ status }),
@@ -60,10 +71,17 @@ export const useAppStore = create<AppState>()(
       setApiKey: (key) => set({ apiKey: key }),
       setSessionStartTime: (time) => set({ sessionStartTime: time }),
       setShowSettings: (show) => set({ showSettings: show }),
+      setRepoPath: (path) => set({ repoPath: path }),
+      setRepoName: (name) => set({ repoName: name }),
+      setIsIndexing: (value) => set({ isIndexing: value }),
     }),
     {
       name: 'vibeless-storage',
-      partialize: (state) => ({ apiKey: state.apiKey }), // Only persist apiKey
+      partialize: (state) => ({
+        apiKey: state.apiKey,
+        repoPath: state.repoPath,
+        repoName: state.repoName
+      }),
     }
   )
 )

@@ -5,7 +5,7 @@ const CAPTURE_INTERVAL = 30000 // 30 seconds between captures
 
 export function useVisionContext() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const { setVisionContext, setError } = useAppStore()
+  const { setVisionContext } = useAppStore()
 
   const analyzeScreenshot = useCallback(async (base64Image: string): Promise<string | null> => {
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY
